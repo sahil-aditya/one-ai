@@ -162,9 +162,9 @@ const App = () => {
   }, [messages, isTyping]);
 
   const startNewChat = async () => {
-    if (!user) return;
     setCurrentChatId(null);
     setMessages([]);
+    setInput('');
     setIsSidebarOpen(false);
   };
 
@@ -176,7 +176,11 @@ const App = () => {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !user || isTyping) return;
+    if (!input.trim() || isTyping) return;
+    if (!user) {
+      setError('Initializing session...');
+      return;
+    }
 
     let chatId = currentChatId;
     if (!chatId) {
@@ -199,28 +203,35 @@ const App = () => {
 
     try {
       const langName = LANGUAGES.find(l => l.code === currentLang)?.name || 'English';
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
           systemInstruction: { 
             parts: [{ 
-              text: `One AI by Sam. Language: ${langName}. 6-Agent ensemble. Refine into master_response. Output JSON.` 
+              text: `You are ONE AI - a 6-agent ensemble (Gemini, Claude, ChatGPT, Copilot, Manus, DeepSeek). Provide a comprehensive response in ${langName}.` 
             }] 
-          },
-          generationConfig: { responseMimeType: "application/json" }
+          }
         })
       });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`API Error: ${errorData.error?.message || response.statusText}`);
+      }
       const data = await response.json();
-      const result = JSON.parse(data.candidates[0].content.parts[0].text);
-      await addDoc(msgRef, { role: 'assistant', text: result.master_response, details: result, timestamp: serverTimestamp() });
-    } catch (e) { 
-      setError("Ensemble processing glitch. Try again."); 
-    }
-    finally { 
-      setIsTyping(false); 
+      if (!data.candidates || !data.candidates[0]) {
+        throw new Error('No response from ensemble');
+      }
+      const responseText = data.candidates[0].content.parts[0].text;
+      await addDoc(msgRef, { role: 'assistant', text: responseText, details: { ensemble: 'gemini-1.5-flash' }, timestamp: serverTimestamp() });
+    } catch (e: any) { 
+      console.error('Send error:', e);
+      setError(`Error: ${e.message || 'Ensemble processing glitch. Try again.'}`);
+    } finally {
+      setIsTyping(false);
+      setTimeout(() => setError(null), 5000);
     }
   };
 
@@ -377,6 +388,11 @@ const App = () => {
               </div>
             )}
           </div>
+          {error && (
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-[12px] font-semibold">
+              {error}
+            </div>
+          )}
         </main>
 
         {/* --- STICKY FLOATING AUTO-EXPANDING INPUT --- */}
@@ -387,7 +403,7 @@ const App = () => {
               <div className="w-full relative group mb-4">
                 <div className="absolute -inset-1 bg-gradient-to-r from-blue-400/20 to-emerald-400/20 rounded-[32px] blur opacity-0 group-focus-within:opacity-100 transition duration-500 pointer-events-none"></div>
                 <div className="relative flex items-end bg-[#1A1A1A] rounded-[32px] p-2 pr-2.5 pl-5 shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-white/10 transition-all focus-within:border-emerald-500/30">
-                  <button type="button" className="text-gray-400 hover:text-white transition-colors mb-2.5 mr-3 shrink-0 scale-90">
+                  <button type="button" onClick={() => setError(null)} className="text-gray-400 hover:text-white transition-colors mb-2.5 mr-3 shrink-0 scale-90">
                     <Link2 className="w-5 h-5 rotate-45" />
                   </button>
                   
